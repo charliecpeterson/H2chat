@@ -3,8 +3,6 @@
 ## Testing
 pip install -r requirements.txt
 
-python frontend/build_frontend.py
-
 python app.py
 
 ## Build docker image

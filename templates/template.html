@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{PAGE_TITLE}}</title> <script src="https://cdn.tailwindcss.com"></script>
+    <title>{{PAGE_TITLE}}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         /* Custom scrollbar for chat messages (optional) */
@@ -46,7 +47,7 @@
             border-radius: 0.5rem;
             background-color: #e2e8f0; /* Tailwind gray-200 */
             color: #4a5568; /* Tailwind gray-700 */
-            align-self: flex-start;
+            align-self: flex-start; /* Align to the left like bot messages */
         }
         .thinking-indicator .dot {
             width: 8px;
@@ -104,25 +105,39 @@
         }
         .chat-bubble-content code {
             /* Inline code styling (if not inside pre) */
-            /* background-color: #edf2f7; Tailwind gray-200 */
-            /* color: #c53030; Tailwind red-700 */
-            /* padding: 0.125rem 0.25rem; */
-            /* border-radius: 0.25rem; */
-            /* font-family: 'Menlo', 'Monaco', 'Consolas', "Liberation Mono", "Courier New", monospace; */
         }
-        /* Ensure code inside pre doesn't get the inline styling if you enable it above */
         .chat-bubble-content pre code {
             background-color: transparent;
             color: inherit;
             padding: 0;
             border-radius: 0;
         }
-        /* Styling for header description if it contains paragraphs */
-        .header-description p {
-            margin: 0; /* Reset paragraph margin if directly injecting HTML */
-        }
+        .chat-bubble-content a {
+    color: #F3F4F6; /* Tailwind gray-100 for light text on dark bubbles */
+    text-decoration: underline;
+    font-weight: 500; /* Medium weight to make it stand out a bit */
+}
 
-        /* Code block wrapper and copy button styling */
+.chat-bubble-content a:hover {
+    color: #D1D5DB; /* Tailwind gray-300 for a slightly lighter hover state */
+    text-decoration: underline;
+}
+
+/* If you have user messages with a light background and dark text: */
+.flex.justify-end .chat-bubble-content a { /* Targeting user message specifically if its style differs */
+    color: #EBF8FF; /* A light blue, assuming user bubble is dark blue */
+    /* Or, if user bubble is light and text is dark: */
+    /* color: #2563EB; */ /* Tailwind blue-600 for dark text on light bubbles */
+}
+
+.flex.justify-end .chat-bubble-content a:hover {
+    /* color: #BEE3F8; */ /* Lighter blue for hover */
+    /* Or, if user bubble is light and text is dark: */
+    /* color: #1D4ED8; */ /* Tailwind blue-700 for hover */
+}
+        .header-description p {
+            margin: 0;
+        }
         .code-block-wrapper {
             position: relative;
             margin-top: 0.5rem;
@@ -160,7 +175,6 @@
         .copy-button.copied {
             background-color: #10b981; /* Tailwind green-500 */
         }
-        /* Adjust pre to work with the header */
         .code-block-wrapper pre {
             margin-top: 0;
             border-top-left-radius: 0;
@@ -173,26 +187,25 @@
 
     <div class="chat-container max-w-2xl mx-auto bg-white shadow-lg rounded-lg overflow-hidden">
         <header class="bg-blue-600 text-white p-4 text-center rounded-t-lg">
-            <h1 class="text-xl font-semibold">{{PAGE_TITLE}}</h1> <div class="text-sm header-description">{{HEADER_DESCRIPTION_HTML}}</div> </header>
+            <h1 class="text-xl font-semibold">{{PAGE_TITLE}}</h1>
+            <div class="text-sm header-description">{{HEADER_DESCRIPTION_HTML}}</div>
+        </header>
 
         <div id="chatMessages" class="flex-grow p-6 space-y-4 overflow-y-auto bg-gray-50">
             <div class="flex">
                 <div class="bg-indigo-500 text-white p-3 rounded-lg max-w-xs md:max-w-md shadow">
-                    <div class="chat-bubble-content">
-                        {{INITIAL_BOT_MESSAGE_HTML}} </div>
+                    <div class="chat-bubble-content" id="initialBotMessageContent">
+                        </div>
                 </div>
             </div>
-            </div>
+        </div>
 
-        <div id="thinkingIndicator" class="hidden p-6 pt-0">
-             <div class="thinking-indicator">
-                <span>Thinking</span>
+        <div id="thinkingIndicatorWrapper" class="hidden p-6 pt-0"> <div class="thinking-indicator"> <span>Thinking</span>
                 <span class="dot"></span>
                 <span class="dot"></span>
                 <span class="dot"></span>
             </div>
         </div>
-
 
         <footer class="bg-white border-t border-gray-200 p-4 rounded-b-lg">
             <form id="chatForm" class="flex items-center space-x-3">
@@ -206,41 +219,23 @@
     </div>
 
     <script>
-        // Configure marked.js renderer FIRST - before any other code
+        // Configure marked.js renderer
         if (typeof marked !== 'undefined') {
             const renderer = new marked.Renderer();
-            
-            // Special handling for code blocks
             renderer.code = function(code, language) {
-                console.log("Code block received:", code);
+                // Handle case where code might be a token object
+                let codeText = code;
+                if (typeof code === 'object' && code !== null) {
+                    codeText = code.text || code.raw || String(code);
+                }
                 
                 const langClass = language ? ` class="language-${language}"` : '';
                 const langDisplay = language || 'code';
-                
-                // Extract the text from the object structure
-                let codeContent = '';
-                
-                if (code && typeof code === 'object' && code.text) {
-                    // If it's an object with the structure shown in the debug output
-                    codeContent = code.text;
-                } else if (code && typeof code === 'object') {
-                    // Fallback to JSON stringify for other object types
-                    try {
-                        codeContent = JSON.stringify(code, null, 2);
-                    } catch (e) {
-                        codeContent = 'Error: Unable to process code block';
-                    }
-                } else {
-                    // Handle primitive values
-                    codeContent = String(code || '');
-                }
-                
-                // Always escape HTML
-                const safeCode = codeContent
+                // Fix: Ensure code is a string and handle null/undefined values
+                const safeCode = String(codeText || '')
                     .replace(/&/g, '&amp;')
                     .replace(/</g, '&lt;')
                     .replace(/>/g, '&gt;');
-                
                 return `<div class="code-block-wrapper">
                     <div class="code-header">
                         <span class="code-language">${langDisplay}</span>
@@ -249,12 +244,10 @@
                     <pre><code${langClass}>${safeCode}</code></pre>
                 </div>`;
             };
-            
-            // Set the custom renderer
             marked.setOptions({
                 renderer: renderer,
                 highlight: function(code, lang) {
-                    return code;
+                    return code; // No client-side syntax highlighting, relying on <pre> and CSS
                 }
             });
         }
@@ -264,11 +257,23 @@
         const questionInput = document.getElementById('questionInput');
         const chatMessages = document.getElementById('chatMessages');
         const sendButton = document.getElementById('sendButton');
-        const thinkingIndicator = document.getElementById('thinkingIndicator');
+        const thinkingIndicatorWrapper = document.getElementById('thinkingIndicatorWrapper'); // Get the wrapper
+        const initialBotMessageContent = document.getElementById('initialBotMessageContent');
+
+        // --- Chat History ---
+        let conversationHistory = []; // Format: [{ role: "user" / "assistant", content: "message text" }, ...]
+
+        // --- Function to Add Initial Bot Message and Store in History ---
+        function initializeBotMessage() {
+            const initialMessageText = "{{INITIAL_BOT_MESSAGE_HTML}}"; // Get text from Flask
+            initialBotMessageContent.innerHTML = typeof marked !== 'undefined' ? marked.parse(initialMessageText) : initialMessageText;
+            conversationHistory.push({ role: "assistant", content: initialMessageText });
+        }
+
 
         // --- Event Listener for Form Submission ---
         chatForm.addEventListener('submit', async function(event) {
-            event.preventDefault(); 
+            event.preventDefault();
 
             const questionText = questionInput.value.trim();
             if (!questionText) {
@@ -276,12 +281,13 @@
                 return;
             }
 
+            // Disable input and show thinking indicator
             questionInput.disabled = true;
             sendButton.disabled = true;
-            thinkingIndicator.classList.remove('hidden');
+            thinkingIndicatorWrapper.classList.remove('hidden'); // Show thinking indicator
 
-            appendMessage(questionText, 'user');
-            questionInput.value = ''; 
+            appendMessage(questionText, 'user'); // Adds to UI and conversationHistory
+            questionInput.value = '';
 
             try {
                 const response = await fetch('/ask', {
@@ -289,7 +295,11 @@
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ question: questionText }),
+                    // Send the current question AND the history
+                    body: JSON.stringify({
+                        question: questionText,
+                        history: conversationHistory.slice(0, -1) // Send history up to the last user message
+                    }),
                 });
 
                 if (!response.ok) {
@@ -298,58 +308,57 @@
                     appendMessage(`Error: ${errorData.error || `Failed to get an answer (status ${response.status}). Please try again.`}`, 'bot', true);
                 } else {
                     const data = await response.json();
-                    appendMessage(data.answer, 'bot');
+                    appendMessage(data.answer, 'bot'); // Adds to UI and conversationHistory
                 }
 
             } catch (error) {
                 console.error('Network or other error:', error);
                 appendMessage('Sorry, I encountered a problem connecting to the server. Please check your connection and try again.', 'bot', true);
             } finally {
+                // Re-enable input and hide thinking indicator
                 questionInput.disabled = false;
                 sendButton.disabled = false;
-                thinkingIndicator.classList.add('hidden');
-                questionInput.focus(); 
+                thinkingIndicatorWrapper.classList.add('hidden'); // Hide thinking indicator
+                questionInput.focus();
             }
         });
 
-        // --- Helper Function to Append Messages to Chat ---
+        // --- Helper Function to Append Messages to Chat UI and History ---
         function appendMessage(text, sender, isError = false) {
             const messageDiv = document.createElement('div');
-            messageDiv.classList.add('flex', 'mb-3');
+            messageDiv.classList.add('flex', 'mb-3'); // Tailwind classes for layout
 
             const bubbleDiv = document.createElement('div');
-            bubbleDiv.classList.add('p-3', 'rounded-lg', 'shadow', 'max-w-md', 'md:max-w-lg');
-            
+            bubbleDiv.classList.add('p-3', 'rounded-lg', 'shadow', 'max-w-md', 'md:max-w-lg'); // Bubble styling
+
             const contentWrapper = document.createElement('div');
-            contentWrapper.classList.add('chat-bubble-content');
+            contentWrapper.classList.add('chat-bubble-content'); // For Markdown styling
 
             if (sender === 'user') {
-                messageDiv.classList.add('justify-end');
+                messageDiv.classList.add('justify-end'); // Align user messages to the right
                 bubbleDiv.classList.add('bg-blue-500', 'text-white');
-                contentWrapper.textContent = text; 
+                contentWrapper.textContent = text; // User messages are plain text
             } else { // 'bot'
-                messageDiv.classList.add('justify-start');
+                messageDiv.classList.add('justify-start'); // Align bot messages to the left
                 if (isError) {
-                    bubbleDiv.classList.add('bg-red-500', 'text-white');
-                    contentWrapper.textContent = text; 
+                    bubbleDiv.classList.add('bg-red-500', 'text-white'); // Error styling
+                    contentWrapper.textContent = text;
                 } else {
-                    bubbleDiv.classList.add('bg-indigo-500', 'text-white');
-                    if (typeof marked === 'function') {
+                    bubbleDiv.classList.add('bg-indigo-500', 'text-white'); // Regular bot message styling
+                    // Use marked.js to parse Markdown if available
+                    if (typeof marked === 'function' || (typeof marked !== 'undefined' && typeof marked.parse === 'function')) {
                         contentWrapper.innerHTML = marked.parse(text);
-                    } else if (typeof marked !== 'undefined' && typeof marked.parse === 'function') {
-                         contentWrapper.innerHTML = marked.parse(text);
-                    }
-                    else {
+                    } else {
                         console.warn('marked.js is not loaded correctly. Displaying raw text.');
-                        contentWrapper.textContent = text; 
+                        contentWrapper.textContent = text; // Fallback to plain text
                     }
-                    
-                    // After innerHTML is set, find code blocks and attach event handlers
-                    setTimeout(() => {
+
+                    // Add copy buttons to code blocks after rendering
+                    setTimeout(() => { // setTimeout to ensure DOM is updated
                         const copyButtons = contentWrapper.querySelectorAll('.copy-button');
                         copyButtons.forEach(button => {
-                            if (!button.hasAttribute('listener')) {
-                                button.setAttribute('listener', 'true');
+                            if (!button.hasAttribute('data-listener-attached')) { // Prevent multiple listeners
+                                button.setAttribute('data-listener-attached', 'true');
                                 button.addEventListener('click', function() {
                                     copyCode(this);
                                 });
@@ -363,47 +372,64 @@
             messageDiv.appendChild(bubbleDiv);
             chatMessages.appendChild(messageDiv);
 
+            // Add to conversation history
+            // Standardize role names to "user" and "assistant" for easier processing on the backend
+            conversationHistory.push({ role: (sender === 'user' ? 'user' : 'assistant'), content: text });
+
+            // Scroll to the bottom of the chat
             chatMessages.scrollTop = chatMessages.scrollHeight;
         }
 
-        // Function to copy code to clipboard
+        // --- Function to Copy Code to Clipboard ---
         function copyCode(button) {
-            const codeBlock = button.closest('.code-block-wrapper').querySelector('code');
-            const textToCopy = codeBlock.textContent;
-            
-            navigator.clipboard.writeText(textToCopy).then(() => {
-                // Visual feedback that code was copied
+            const codeBlockWrapper = button.closest('.code-block-wrapper');
+            if (!codeBlockWrapper) return;
+            const codeElement = codeBlockWrapper.querySelector('code');
+            if (!codeElement) return;
+
+            const textToCopy = codeElement.textContent;
+
+            // Use a temporary textarea to copy, as navigator.clipboard might be restricted in some iframe contexts
+            const textArea = document.createElement("textarea");
+            textArea.value = textToCopy;
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
                 button.textContent = 'Copied!';
                 button.classList.add('copied');
-                
-                // Reset button after 2 seconds
-                setTimeout(() => {
-                    button.textContent = 'Copy';
-                    button.classList.remove('copied');
-                }, 2000);
-            }).catch(err => {
-                console.error('Failed to copy: ', err);
+            } catch (err) {
+                console.error('Failed to copy text: ', err);
                 button.textContent = 'Error!';
-                setTimeout(() => {
-                    button.textContent = 'Copy';
-                }, 2000);
-            });
+                // Fallback or message to user if execCommand fails
+                // For example, prompt them to copy manually
+                // alert("Failed to copy. Please select and copy manually.");
+            }
+            document.body.removeChild(textArea);
+
+
+            // Reset button text after a delay
+            setTimeout(() => {
+                button.textContent = 'Copy';
+                button.classList.remove('copied');
+            }, 2000);
         }
 
+        // --- Window Load ---
         window.onload = () => {
-            questionInput.focus();
+            initializeBotMessage(); // Add initial bot message to UI and history
+            questionInput.focus(); // Focus on the input field
+
             if (typeof marked === 'undefined' || (typeof marked !== 'function' && (typeof marked === 'object' && typeof marked.parse !== 'function'))) {
                 console.error("Marked.js library not loaded! Markdown rendering will not work.");
-                // Don't call appendMessage here as the DOM might not be fully ready for it in a way that's visible
-                // The console error is the primary feedback mechanism for this dev-time issue.
             } else {
                 console.log("Marked.js loaded successfully.");
             }
 
-            // Handle existing copy buttons on page load
+            // Attach listeners to any pre-existing copy buttons (e.g., if initial message had code)
             document.querySelectorAll('.copy-button').forEach(button => {
-                if (!button.hasAttribute('listener')) {
-                    button.setAttribute('listener', 'true');
+                 if (!button.hasAttribute('data-listener-attached')) {
+                    button.setAttribute('data-listener-attached', 'true');
                     button.addEventListener('click', function() {
                         copyCode(this);
                     });

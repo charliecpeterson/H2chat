@@ -4,36 +4,29 @@
 # for users to ask questions to the LlamaIndex-powered chatbot.
 
 import os
-from flask import Flask, request, jsonify, send_from_directory
-from werkzeug.utils import secure_filename # For potential future file uploads, not used now but good practice
+from flask import Flask, request, jsonify, render_template # Added render_template
+from werkzeug.utils import secure_filename
 
-# Import functions from your existing chatbot script
-# We'll assume hoffman2_chatbot.py is in the same directory
-# and we'll modify it slightly.
 from hoffman2_chatbot_web import load_environment, load_hoffman2_index, ask_hoffman2_web
 
 # --- Flask App Initialization ---
-app = Flask(__name__, static_folder='static') # Define static folder for CSS, JS, images
+# Flask looks for templates in a folder named "templates" by default.
+# Explicitly setting template_folder here for clarity.
+# **Action Required**: Ensure you have a folder named "templates" in the same
+# directory as this app.py file, and that template.html is inside it.
+app = Flask(__name__, template_folder='templates')
 
 # --- Configuration ---
-# It's good practice to configure your app, e.g., for secret keys or environment-specific settings.
-# For now, we'll keep it simple.
-# app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'a_very_secret_key_for_development')
-app.config['INDEX_PATH'] = "./hoffman2_index" # Path to your LlamaIndex
+app.config['INDEX_PATH'] = "./hoffman2_index"
 
 # --- Load Chatbot Components ---
-# These will be loaded once when the Flask app starts.
 query_engine = None
 
 def initialize_chatbot():
-    """
-    Loads environment variables and the LlamaIndex query engine.
-    This function is called when the Flask app starts.
-    """
     global query_engine
     try:
         print("Initializing chatbot environment...")
-        load_environment() # Loads OpenAI API Key from .env
+        load_environment()
         print("Environment loaded.")
 
         print(f"Loading Hoffman2 index from: {app.config['INDEX_PATH']}")
@@ -42,17 +35,15 @@ def initialize_chatbot():
             print("Chatbot query engine loaded successfully.")
         else:
             print("Failed to load chatbot query engine. The application might not work correctly.")
-            # You might want to raise an error here or prevent the app from starting
-            # if the index is critical and not found.
     except ValueError as ve:
         print(f"Configuration Error: {ve}")
         print("Please ensure your .env file is set up correctly with OPENAI_API_KEY.")
-        # Depending on severity, you might want to exit or disable chat functionality
+    except FileNotFoundError as fnfe: # More specific error handling for missing index
+        print(f"Initialization Error: {fnfe}")
+        print(f"Please ensure the index directory exists at: {app.config['INDEX_PATH']}")
     except Exception as e:
         print(f"An unexpected error occurred during chatbot initialization: {e}")
-        # Log this error appropriately in a production environment
 
-# Call initialization when the app is created
 initialize_chatbot()
 
 # --- Flask Routes ---
@@ -60,45 +51,64 @@ initialize_chatbot()
 @app.route('/')
 def index():
     """
-    Serves the main HTML page for the chatbot.
-    Looks for index.html in the 'static' folder.
+    Serves the main HTML page for the chatbot using render_template.
     """
-    return send_from_directory(app.static_folder, 'index.html')
+    # Define content for the template
+    page_title = "Hoffman2 HPC Chatbot"
+    header_description_html = "Ask me anything about using the Hoffman2 cluster! I can help with commands, job submission, software modules, and more."
+    initial_bot_message_html = "Hello! I'm the Hoffman2 HPC Assistant. How can I help you navigate the cluster today?"
+    input_placeholder = "Type your question about Hoffman2..."
+
+    return render_template('template.html',
+                           PAGE_TITLE=page_title,
+                           HEADER_DESCRIPTION_HTML=header_description_html,
+                           INITIAL_BOT_MESSAGE_HTML=initial_bot_message_html,
+                           INPUT_PLACEHOLDER=input_placeholder)
 
 @app.route('/ask', methods=['POST'])
 def ask():
     """
     API endpoint to handle questions from the user.
-    Expects a JSON payload with a "question" field.
+    Expects a JSON payload with "question" and optionally "history".
     Returns a JSON response with the "answer".
     """
     if not query_engine:
         return jsonify({"error": "Chatbot is not initialized. Please check server logs."}), 500
 
     data = request.get_json()
-    if not data or 'question' not in data:
-        return jsonify({"error": "Missing 'question' in request JSON."}), 400
+    if not data:
+        return jsonify({"error": "Invalid JSON payload."}), 400
 
-    question = data['question']
+    question = data.get('question')
+    # Get history from the request, default to an empty list if not provided
+    chat_history = data.get('history', [])
+
     if not isinstance(question, str) or not question.strip():
         return jsonify({"error": "'question' must be a non-empty string."}), 400
+    
+    # Validate chat_history structure (optional but good practice)
+    if not isinstance(chat_history, list):
+        return jsonify({"error": "'history' must be a list."}), 400
+    for item in chat_history:
+        if not isinstance(item, dict) or 'role' not in item or 'content' not in item:
+            return jsonify({"error": "Invalid item in 'history'. Each item must be a dict with 'role' and 'content'."}), 400
+
 
     print(f"Received question: {question}")
+    if chat_history:
+        print(f"Received history with {len(chat_history)} entries.")
 
     try:
-        answer, query_time = ask_hoffman2_web(query_engine, question)
-        print(f"Generated answer in {query_time:.2f}s: {answer}")
-        return jsonify({"answer": answer, "query_time": query_time})
+        # Pass the question and chat_history to the backend function
+        answer, query_time = ask_hoffman2_web(query_engine, question, chat_history=chat_history)
+        print(f"Generated answer in {query_time:.2f}s: {str(answer)[:100]}...") # Log snippet, ensure answer is string
+        return jsonify({"answer": str(answer), "query_time": query_time}) # Ensure answer is string
     except Exception as e:
-        # Log the exception in a real application
         print(f"Error processing question '{question}': {e}")
-        # Consider more specific error handling based on exception types
         return jsonify({"error": "An error occurred while processing your question."}), 500
 
 # --- Main Execution ---
 if __name__ == '__main__':
-    # IMPORTANT: For development only.
-    # In production, use a WSGI server like Gunicorn or uWSGI.
-    # Example: gunicorn -w 4 -b 0.0.0.0:5000 app:app
-    # Ensure OPENAI_API_KEY is set in the environment where this app runs.
+    # For development: debug=True allows for hot-reloading and provides a debugger.
+    # Host '0.0.0.0' makes the server accessible from other devices on the same network.
     app.run(debug=True, host='0.0.0.0', port=5000)
