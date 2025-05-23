@@ -121,6 +121,51 @@
         .header-description p {
             margin: 0; /* Reset paragraph margin if directly injecting HTML */
         }
+
+        /* Code block wrapper and copy button styling */
+        .code-block-wrapper {
+            position: relative;
+            margin-top: 0.5rem;
+            margin-bottom: 0.75rem;
+        }
+        .code-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: #1e293b; /* Tailwind gray-900 */
+            color: #e2e8f0; /* Tailwind gray-200 */
+            padding: 0.5rem 1rem;
+            border-top-left-radius: 0.375rem;
+            border-top-right-radius: 0.375rem;
+            font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
+            font-size: 0.75rem; /* Tailwind text-xs */
+        }
+        .code-language {
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .copy-button {
+            background-color: #4b5563; /* Tailwind gray-700 */
+            color: #e2e8f0; /* Tailwind gray-200 */
+            border: none;
+            border-radius: 0.25rem;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .copy-button:hover {
+            background-color: #6b7280; /* Tailwind gray-500 */
+        }
+        .copy-button.copied {
+            background-color: #10b981; /* Tailwind green-500 */
+        }
+        /* Adjust pre to work with the header */
+        .code-block-wrapper pre {
+            margin-top: 0;
+            border-top-left-radius: 0;
+            border-top-right-radius: 0;
+        }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
@@ -161,6 +206,59 @@
     </div>
 
     <script>
+        // Configure marked.js renderer FIRST - before any other code
+        if (typeof marked !== 'undefined') {
+            const renderer = new marked.Renderer();
+            
+            // Special handling for code blocks
+            renderer.code = function(code, language) {
+                console.log("Code block received:", code);
+                
+                const langClass = language ? ` class="language-${language}"` : '';
+                const langDisplay = language || 'code';
+                
+                // Extract the text from the object structure
+                let codeContent = '';
+                
+                if (code && typeof code === 'object' && code.text) {
+                    // If it's an object with the structure shown in the debug output
+                    codeContent = code.text;
+                } else if (code && typeof code === 'object') {
+                    // Fallback to JSON stringify for other object types
+                    try {
+                        codeContent = JSON.stringify(code, null, 2);
+                    } catch (e) {
+                        codeContent = 'Error: Unable to process code block';
+                    }
+                } else {
+                    // Handle primitive values
+                    codeContent = String(code || '');
+                }
+                
+                // Always escape HTML
+                const safeCode = codeContent
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;');
+                
+                return `<div class="code-block-wrapper">
+                    <div class="code-header">
+                        <span class="code-language">${langDisplay}</span>
+                        <button class="copy-button">Copy</button>
+                    </div>
+                    <pre><code${langClass}>${safeCode}</code></pre>
+                </div>`;
+            };
+            
+            // Set the custom renderer
+            marked.setOptions({
+                renderer: renderer,
+                highlight: function(code, lang) {
+                    return code;
+                }
+            });
+        }
+
         // DOM Elements
         const chatForm = document.getElementById('chatForm');
         const questionInput = document.getElementById('questionInput');
@@ -245,6 +343,19 @@
                         console.warn('marked.js is not loaded correctly. Displaying raw text.');
                         contentWrapper.textContent = text; 
                     }
+                    
+                    // After innerHTML is set, find code blocks and attach event handlers
+                    setTimeout(() => {
+                        const copyButtons = contentWrapper.querySelectorAll('.copy-button');
+                        copyButtons.forEach(button => {
+                            if (!button.hasAttribute('listener')) {
+                                button.setAttribute('listener', 'true');
+                                button.addEventListener('click', function() {
+                                    copyCode(this);
+                                });
+                            }
+                        });
+                    }, 0);
                 }
             }
 
@@ -253,6 +364,30 @@
             chatMessages.appendChild(messageDiv);
 
             chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // Function to copy code to clipboard
+        function copyCode(button) {
+            const codeBlock = button.closest('.code-block-wrapper').querySelector('code');
+            const textToCopy = codeBlock.textContent;
+            
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                // Visual feedback that code was copied
+                button.textContent = 'Copied!';
+                button.classList.add('copied');
+                
+                // Reset button after 2 seconds
+                setTimeout(() => {
+                    button.textContent = 'Copy';
+                    button.classList.remove('copied');
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy: ', err);
+                button.textContent = 'Error!';
+                setTimeout(() => {
+                    button.textContent = 'Copy';
+                }, 2000);
+            });
         }
 
         window.onload = () => {
@@ -264,6 +399,16 @@
             } else {
                 console.log("Marked.js loaded successfully.");
             }
+
+            // Handle existing copy buttons on page load
+            document.querySelectorAll('.copy-button').forEach(button => {
+                if (!button.hasAttribute('listener')) {
+                    button.setAttribute('listener', 'true');
+                    button.addEventListener('click', function() {
+                        copyCode(this);
+                    });
+                }
+            });
         };
     </script>
 

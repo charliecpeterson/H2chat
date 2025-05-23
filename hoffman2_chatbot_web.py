@@ -24,11 +24,9 @@ def load_environment():
         # In a web app, raising an error is better than sys.exit
         raise ValueError("OPENAI_API_KEY not found. Please create a .env file or set the environment variable.")
 
-    # Configure LlamaIndex settings (models, etc.)
-    # These settings are used globally by LlamaIndex
     try:
-        Settings.embed_model = OpenAIEmbedding(model="text-embedding-3-small")
-        Settings.llm = OpenAI(model="gpt-4o") # or your preferred model
+        Settings.embed_model = OpenAIEmbedding(model="text-embedding-3-large")
+        Settings.llm = OpenAI(model="gpt-4o") 
         print("LlamaIndex OpenAI models configured.")
     except Exception as e:
         raise RuntimeError(f"Failed to initialize OpenAI models for LlamaIndex: {e}")
@@ -84,34 +82,15 @@ def ask_hoffman2_web(query_engine, question: str):
 
     start_time = time.time()
 
-    # Determine if the question is about workshops to tailor the prompt
-    workshop_keywords = ["workshop", "course", "tutorial", "training", "class", "lesson", "seminar"]
-    is_workshop_question = any(keyword in question.lower() for keyword in workshop_keywords)
+    # Simple generic prompt without workshop detection or skill level assessment
+    enhanced_question = f"""
+    You are an AI assistant for UCLA's Hoffman2 HPC cluster.
+    Please answer the following question:
+    "{question}"
 
-    # Enhanced prompt for better context and user assistance
-    if is_workshop_question:
-        # Prompt specifically for workshop-related queries
-        enhanced_question = f"""
-        You are an AI assistant for UCLA's Hoffman2 HPC cluster.
-        A user is asking about workshops or training. Please answer the following question:
-        "{question}"
-
-        Provide details about relevant workshops, including topics covered and how they might benefit the user.
-        If specific workshop names or links are in your knowledge base, please include them.
-        Your goal is to guide the user to appropriate learning resources.
-        """
-    else:
-        # General prompt, emphasizing help for novice users
-        enhanced_question = f"""
-        You are an AI assistant for UCLA's Hoffman2 HPC cluster, designed to help users of all skill levels, especially novices.
-        Please answer the following question clearly and concisely:
-        "{question}"
-
-        If the question seems basic or from a beginner, provide step-by-step instructions if applicable.
-        Use clear language and avoid excessive jargon. If technical terms are necessary, briefly explain them.
-        If the question involves commands, provide the exact syntax and an example if possible.
-        Your primary goal is to be helpful and make Hoffman2 more accessible.
-        """
+    Provide clear and accurate information based on the Hoffman2 documentation.
+    If the question involves commands, provide the exact syntax and examples when helpful.
+    """
     
     print(f"Querying index with enhanced question: {enhanced_question[:100]}...") # Log snippet of question
     
@@ -128,4 +107,3 @@ def ask_hoffman2_web(query_engine, question: str):
     
     print(f"Query completed in {query_duration:.2f} seconds.")
     return answer, query_duration
-

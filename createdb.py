@@ -3,13 +3,15 @@ import shutil
 import json
 import requests
 import git
+import re
+import tempfile
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from llama_index.core import SimpleDirectoryReader, Settings, Document
 from llama_index.core import StorageContext, VectorStoreIndex
 from llama_index.core.vector_stores import SimpleVectorStore
-from llama_index.core.node_parser import SimpleNodeParser
+from llama_index.core.node_parser import SimpleNodeParser, MarkdownNodeParser
 from llama_index.readers.web import SimpleWebPageReader
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.llms.openai import OpenAI
@@ -24,7 +26,7 @@ def load_environment():
         raise ValueError("OPENAI_API_KEY not found. Please create a .env file with your API key.")
     
     # Create embedding and LLM instances
-    embed_model = OpenAIEmbedding(model="text-embedding-3-small")
+    embed_model = OpenAIEmbedding(model="text-embedding-3-large")
     llm = OpenAI(model="gpt-4o")
     
     # Set up settings globally
@@ -80,11 +82,99 @@ def get_all_links(base_url, max_pages=50):
     print(f"Crawling complete. Found {len(visited)} pages.")
     return list(visited)
 
+def preserve_code_blocks(html_content):
+    """
+    Pre-process HTML to preserve code blocks, backticks and special characters
+    before converting to Markdown
+    """
+    soup = BeautifulSoup(html_content, 'html.parser')
+    
+    # Find all code blocks and pre blocks
+    for code_block in soup.select('pre, code, .code'):
+        # Mark the code block with a special wrapper
+        wrapper = soup.new_tag('div')
+        wrapper['class'] = 'preserved-code-block'
+        code_block.wrap(wrapper)
+        
+        # Replace the content with a placeholder that won't be affected by markdown conversion
+        code_text = code_block.get_text()
+        # Replace backticks with a special marker
+        code_text = code_text.replace('`', '%%%BACKTICK%%%')
+        # Replace hash symbols with special marker at beginning of lines
+        code_text = re.sub(r'^(\s*)#', r'\1%%%HASH%%%', code_text, flags=re.MULTILINE)
+        code_block.string = code_text
+    
+    return str(soup)
 
-import git
-import tempfile
-import os
-from pathlib import Path
+def restore_code_blocks(markdown_text):
+    """
+    Restore code blocks with their original formatting after Markdown conversion
+    """
+    # Restore hash symbols at line beginnings (in code blocks)
+    markdown_text = re.sub(r'%%%HASH%%%', '#', markdown_text)
+    # Restore backticks
+    markdown_text = re.sub(r'%%%BACKTICK%%%', '`', markdown_text)
+    
+    return markdown_text
+
+def html_to_markdown(html_content, url):
+    """Convert HTML to Markdown while preserving structure and code blocks"""
+    from markdownify import markdownify as md
+    from bs4 import BeautifulSoup
+    
+    # First preserve code blocks with special markers
+    preserved_html = preserve_code_blocks(html_content)
+    
+    soup = BeautifulSoup(preserved_html, 'html.parser')
+    
+    # Remove navigation, footers, etc.
+    for element in soup.select('nav, footer, .navigation, .menu, #sidebar'):
+        element.extract()
+    
+    # Convert to markdown
+    markdown_text = md(str(soup))
+    
+    # Restore special markers in code blocks
+    markdown_text = restore_code_blocks(markdown_text)
+    
+    # Add source URL as metadata in the markdown
+    markdown_text = f"# Source: {url}\n\n{markdown_text}"
+    
+    # Ensure code blocks use triple backticks
+    markdown_text = re.sub(r'```\n', '```bash\n', markdown_text)
+    
+    return markdown_text
+
+def process_script_file(file_path, repo_name):
+    """Process script files to properly format them as code blocks"""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Get file extension to use as language hint
+        extension = os.path.splitext(file_path)[1][1:].lower()
+        if extension == 'sh':
+            language = 'bash'
+        elif extension == 'py':
+            language = 'python'
+        else:
+            language = extension or 'text'
+        
+        # Format as proper markdown code block
+        formatted_content = f"### {os.path.basename(file_path)} START ###\n```{language}\n{content}\n```\n### {os.path.basename(file_path)} STOP ###"
+        
+        relative_path = os.path.basename(file_path)
+        return Document(
+            text=formatted_content,
+            metadata={
+                "source": f"{repo_name}/{relative_path}",
+                "title": f"Script: {relative_path}",
+                "script": "true"
+            }
+        )
+    except Exception as e:
+        print(f"Error processing script file {file_path}: {e}")
+        return None
 
 def process_github_repo(repo_url, cleaned_documents):
     """Clone a GitHub repository and extract useful content for the knowledge base"""
@@ -107,6 +197,13 @@ def process_github_repo(repo_url, cleaned_documents):
             # Process notebooks
             notebook_files = list(Path(temp_dir).glob("**/*.ipynb"))
             print(f"Found {len(notebook_files)} notebook files")
+            
+            # Process script files (sh, bash, py)
+            script_files = []
+            script_files.extend(list(Path(temp_dir).glob("**/*.sh")))
+            script_files.extend(list(Path(temp_dir).glob("**/*.bash")))
+            script_files.extend(list(Path(temp_dir).glob("**/*.py")))
+            print(f"Found {len(script_files)} script files")
             
             # Process markdown files
             for md_file in markdown_files:
@@ -173,6 +270,13 @@ def process_github_repo(repo_url, cleaned_documents):
                 except Exception as e:
                     print(f"Error processing notebook {nb_file}: {e}")
             
+            # Process script files with special handling
+            for script_file in script_files:
+                doc = process_script_file(script_file, repo_name)
+                if doc:
+                    cleaned_documents.append(doc)
+                    print(f"Added script content from {script_file.name}")
+            
             # Look for a README file and add special metadata
             readme_files = [f for f in markdown_files if f.name.lower() == 'readme.md']
             if readme_files:
@@ -221,7 +325,24 @@ def main():
     
     print("Scraping documentation from website...")
     try:
-        documents = SimpleWebPageReader(html_to_text=True).load_data(urls_to_scrape)
+        # Use our custom HTML to Markdown conversion
+        documents = []
+        for url in urls_to_scrape:
+            try:
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    markdown_content = html_to_markdown(response.content, url)
+                    doc = Document(
+                        text=markdown_content,
+                        metadata={"source": url, "title": f"Page: {url}"}
+                    )
+                    documents.append(doc)
+                    print(f"Converted {url} to markdown")
+                else:
+                    print(f"Failed to get {url}: status code {response.status_code}")
+            except Exception as e:
+                print(f"Error processing {url}: {e}")
+                
         print(f"Loaded {len(documents)} documents")
     except Exception as e:
         print(f"Error during web scraping: {e}")
@@ -257,7 +378,6 @@ def main():
         "https://github.com/ucla-oarc-hpc/H2HH_rstudio",
         "https://github.com/ucla-oarc-hpc/H2HH_anaconda",
         "https://github.com/ucla-oarc-hpc/H2HH_Python-R",
-        "https://github.com/ucla-oarc-hpc/H2HHs-INTRO-TO-H2"
     ]
     
     # Process each workshop repository
@@ -267,9 +387,9 @@ def main():
     # Add supplementary documents with beginner-friendly explanations
     beginner_docs = [
         {
-            "title": "Getting Started with Hoffman2 for Beginners",
+            "title": "Getting Started with Hoffman2",
             "text": """
-            # Hoffman2 Basics for Beginners
+            # Hoffman2 Basics 
             
             Hoffman2 is UCLA's High-Performance Computing (HPC) cluster. Think of it as a very powerful 
             computer system that you can access remotely to run computationally intensive tasks.
@@ -280,7 +400,7 @@ def main():
                ssh your_username@hoffman2.idre.ucla.edu
                
             2. **Transferring files**: Use SCP or SFTP to move files to/from Hoffman2
-               scp your_file your_username@hoffman2.idre.ucla.edu:~/destination
+               scp your_file your_username@dtn.hoffman2.idre.ucla.edu:~/destination
                
             3. **Running jobs**: Always use job scheduling system (don't run directly on login nodes)
                qsub my_job_script.sh
@@ -307,7 +427,8 @@ def main():
             - `qdel job_id` - Delete a job
             
             ## Module Management
-            - `module avail` - See available software
+            - `modules_lookup -a` - See available software
+            - `modules_lookup -f software_name` - Find specific software
             - `module load software_name` - Load software
             - `module list` - See loaded modules
             """
@@ -319,30 +440,43 @@ def main():
             
             ## Out of Memory Errors
             If your job fails with "out of memory" errors, request more memory:
+            ```bash
             #$ -l h_data=4G  (for 4GB of memory)
+            ```
             
             ## Job Running Too Long
             If your job hits the time limit, increase it:
+            ```bash
             #$ -l h_rt=24:00:00  (for 24 hours)
+            ```
             
             ## Software Not Found
             Always load modules before using software:
+            ```bash
             module load python/3.9.6
+            ```
             """
         }
     ]
 
     # Add these beginner documents to your collection
-    for i, doc_dict in enumerate(beginner_docs):
-        supplementary_doc = Document(
-            text=doc_dict["text"],
-            metadata={"source": f"beginner_guide_{i}", "title": doc_dict["title"]}
-        )
-        cleaned_documents.append(supplementary_doc)
-        print(f"Added supplementary document: {doc_dict['title']}")
+#    for i, doc_dict in enumerate(beginner_docs):
+#        supplementary_doc = Document(
+#            text=doc_dict["text"],
+#            metadata={"source": f"beginner_guide_{i}", "title": doc_dict["title"]}
+#        )
+#        cleaned_documents.append(supplementary_doc)
+#        print(f"Added supplementary document: {doc_dict['title']}")
 
     # Parse documents into nodes for indexing
-    parser = SimpleNodeParser.from_defaults(chunk_size=512, chunk_overlap=50)
+    from llama_index.core.node_parser import MarkdownNodeParser
+    
+    parser = MarkdownNodeParser(
+        chunk_size=512,
+        chunk_overlap=50,
+        markdown_header_splits=True  
+    )
+
     nodes = parser.get_nodes_from_documents(cleaned_documents)
     print(f"Created {len(nodes)} nodes")
     

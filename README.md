@@ -3,7 +3,7 @@
 ## Testing
 pip install -r requirements.txt
 
-python build_frontend.py
+python frontend/build_frontend.py
 
 python app.py
 
