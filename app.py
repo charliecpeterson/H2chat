@@ -1,7 +1,6 @@
 # app.py
 # Description: Flask web server for the Hoffman2 Chatbot.
-# This application serves the HTML frontend and provides an API endpoint
-# for users to ask questions to the LlamaIndex-powered chatbot.
+
 
 import os
 from flask import Flask, request, jsonify, render_template # Added render_template
@@ -11,15 +10,11 @@ from hoffman2_chatbot_web import load_environment, load_hoffman2_index, ask_hoff
 
 # --- Flask App Initialization ---
 # Flask looks for templates in a folder named "templates" by default.
-# Explicitly setting template_folder here for clarity.
-# **Action Required**: Ensure you have a folder named "templates" in the same
-# directory as this app.py file, and that template.html is inside it.
+
 app = Flask(__name__, template_folder='templates')
 
-# --- Configuration ---
 app.config['INDEX_PATH'] = "./hoffman2_index"
 
-# --- Load Chatbot Components ---
 query_engine = None
 
 def initialize_chatbot():
@@ -46,7 +41,6 @@ def initialize_chatbot():
 
 initialize_chatbot()
 
-# --- Flask Routes ---
 
 @app.route('/')
 def index():
@@ -58,12 +52,14 @@ def index():
     header_description_html = "Ask me anything about using the Hoffman2 cluster! I can help with commands, job submission, software modules, and more."
     initial_bot_message_html = "Hello! I'm the Hoffman2 HPC Assistant. How can I help you navigate the cluster today?"
     input_placeholder = "Type your question about Hoffman2..."
+    support_url = "https://support.idre.ucla.edu/helpdesk/Tickets/New"
 
     return render_template('template.html',
                            PAGE_TITLE=page_title,
                            HEADER_DESCRIPTION_HTML=header_description_html,
                            INITIAL_BOT_MESSAGE_HTML=initial_bot_message_html,
-                           INPUT_PLACEHOLDER=input_placeholder)
+                           INPUT_PLACEHOLDER=input_placeholder,
+                           SUPPORT_URL=support_url)
 
 @app.route('/ask', methods=['POST'])
 def ask():
@@ -73,7 +69,8 @@ def ask():
     Returns a JSON response with the "answer".
     """
     if not query_engine:
-        return jsonify({"error": "Chatbot is not initialized. Please check server logs."}), 500
+        error_msg = "Chatbot is not initialized. Please check server logs or [submit a support ticket](https://support.idre.ucla.edu/helpdesk/Tickets/New) for assistance."
+        return jsonify({"error": error_msg}), 500
 
     data = request.get_json()
     if not data:
@@ -93,7 +90,6 @@ def ask():
         if not isinstance(item, dict) or 'role' not in item or 'content' not in item:
             return jsonify({"error": "Invalid item in 'history'. Each item must be a dict with 'role' and 'content'."}), 400
 
-
     print(f"Received question: {question}")
     if chat_history:
         print(f"Received history with {len(chat_history)} entries.")
@@ -102,10 +98,15 @@ def ask():
         # Pass the question and chat_history to the backend function
         answer, query_time = ask_hoffman2_web(query_engine, question, chat_history=chat_history)
         print(f"Generated answer in {query_time:.2f}s: {str(answer)[:100]}...") # Log snippet, ensure answer is string
-        return jsonify({"answer": str(answer), "query_time": query_time}) # Ensure answer is string
+        return jsonify({
+            "answer": str(answer), 
+            "query_time": query_time,
+            "support_url": "https://support.idre.ucla.edu/helpdesk/Tickets/New"
+        }) # Include support URL in all responses
     except Exception as e:
         print(f"Error processing question '{question}': {e}")
-        return jsonify({"error": "An error occurred while processing your question."}), 500
+        error_msg = "An error occurred while processing your question. For personalized assistance, please [submit a support ticket](https://support.idre.ucla.edu/helpdesk/Tickets/New)."
+        return jsonify({"error": error_msg, "support_url": "https://support.idre.ucla.edu/helpdesk/Tickets/New"}), 500
 
 # --- Main Execution ---
 if __name__ == '__main__':

@@ -1,21 +1,17 @@
-# Flask and related
 flask
 python-dotenv
+gunicorn==21.2.0
 
-# LlamaIndex core and OpenAI integration
 llama-index>=0.10.0,<0.11.0 
 llama-index-embeddings-openai
 llama-index-llms-openai
-llama-index-readers-web # For SimpleWebPageReader used in createdb.py
+llama-index-readers-web 
 
-# OpenAI library
 openai
 
-# For createdb.py
 beautifulsoup4
 requests
 GitPython
 nbformat 
 
-# For build_frontend.py
-Markdown # Python Markdown library
+Markdown 

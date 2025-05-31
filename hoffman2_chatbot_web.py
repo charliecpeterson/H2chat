@@ -1,7 +1,4 @@
 # hoffman2_chatbot_web.py
-# Description: Modified version of hoffman2_chatbot.py for web integration.
-# This script contains the core logic for loading the LlamaIndex
-# and querying it. CLI-specific parts have been removed or adapted.
 
 import os
 import sys
@@ -11,25 +8,22 @@ from llama_index.core import StorageContext, load_index_from_storage, Settings
 from llama_index.embeddings.openai import OpenAIEmbedding # Ensure this is the correct import
 from llama_index.llms.openai import OpenAI # Ensure this is the correct import
 
-# Global variable to store the query engine, initialized by Flask app
-# query_engine = None # This will be managed by app.py
 
 def load_environment():
     """
     Load environment variables and check for API key.
     This should be called once when the application starts.
     """
-    load_dotenv() # Load variables from .env file
+    load_dotenv() 
     if not os.getenv("OPENAI_API_KEY"):
-        # In a web app, raising an error is better than sys.exit
-        raise ValueError("OPENAI_API_KEY not found. Please create a .env file or set the environment variable.")
+        raise ValueError("OPENAI_API_KEY not found. Set the environment variable.")
 
     try:
         Settings.embed_model = OpenAIEmbedding(model="text-embedding-3-large")
         Settings.llm = OpenAI(model="gpt-4o")
         print("LlamaIndex OpenAI models configured.")
     except Exception as e:
-        raise RuntimeError(f"Failed to initialize OpenAI models for LlamaIndex: {e}")
+        raise RuntimeError(f"Failed to initialize OpenAI models: {e}")
 
 
 def load_hoffman2_index(index_path="./hoffman2_index"):
@@ -64,14 +58,16 @@ def load_hoffman2_index(index_path="./hoffman2_index"):
         raise RuntimeError(f"Failed to load LlamaIndex: {e}")
 
 
+def get_support_message():
+    """
+    Returns a formatted message with support ticket link.
+    """
+    return "\n\n---\n**Need additional help?** [Submit a support ticket](https://support.idre.ucla.edu/helpdesk/Tickets/New) for personalized assistance from the IDRE team."
+
+
 def ask_hoffman2_web(query_engine, question: str, chat_history: list = None):
     """
     Function to query the Hoffman2 documentation index, considering chat history.
-    Args:
-        query_engine: The LlamaIndex query engine.
-        question: The current user question.
-        chat_history: A list of previous messages, where each message is a dict
-                      like {"role": "user" / "assistant", "content": "message text"}.
     """
     if not query_engine:
         raise ValueError("Query engine is not initialized.")
@@ -81,7 +77,6 @@ def ask_hoffman2_web(query_engine, question: str, chat_history: list = None):
     start_time = time.time()
 
     # Construct a history string to prepend to the prompt
-    # This format is a common way to provide context to LLMs.
     history_context = ""
     if chat_history:
         for entry in chat_history:
@@ -90,8 +85,6 @@ def ask_hoffman2_web(query_engine, question: str, chat_history: list = None):
             history_context += f"{role}: {entry.get('content', '')}\n" # Use .get for safety
         history_context += "\n---\n" # Separator for clarity
 
-    # Updated enhanced_question to include history
-    # The prompt guides the LLM on how to use the history.
     enhanced_question = f"""
 You are an AI assistant for UCLA's Hoffman2 HPC cluster.
 Your knowledge comes from the Hoffman2 documentation.
@@ -106,11 +99,11 @@ User: "{question}"
 
 Provide clear, concise, and accurate information based *only* on the Hoffman2 documentation you have been trained on.
 If the question involves commands, provide the exact syntax and examples when helpful.
-If the answer is not in the documentation, state that the information is not available in your current knowledge base.
+If the answer is not in the documentation, state that the information is not available in your current knowledge base and suggest submitting a support ticket at https://support.idre.ucla.edu/helpdesk/Tickets/New for personalized assistance.
 Do not invent information or answer questions outside the scope of Hoffman2.
 Format your response using Markdown. For example, use backticks for inline code, and triple backticks for code blocks.
 
-Assistant:
+A:
 """
 
     print(f"Querying index with enhanced question (includes history if present). First 200 chars of prompt: {enhanced_question[:200]}...")
@@ -118,9 +111,14 @@ Assistant:
     try:
         response = query_engine.query(enhanced_question)
         answer = response.response
+        
+        # Add support link if the response indicates uncertainty
+        if any(phrase in answer.lower() for phrase in ["not available", "don't know", "not sure", "cannot find"]):
+            answer += get_support_message()
+            
     except Exception as e:
         print(f"Error during LlamaIndex query: {e}")
-        answer = "I apologize, but I encountered an error trying to find an answer. Please try rephrasing your question or try again later."
+        answer = f"I apologize, but I encountered an error trying to find an answer. Please try rephrasing your question.{get_support_message()}"
 
     end_time = time.time()
     query_duration = end_time - start_time
