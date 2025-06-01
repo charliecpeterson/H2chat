@@ -8,6 +8,8 @@ ENV FLASK_APP=app.py
 ENV FLASK_RUN_HOST=0.0.0.0
 ENV FLASK_RUN_PORT=5000
 
+RUN useradd --create-home --shell /bin/bash app
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     build-essential \
@@ -23,9 +25,14 @@ RUN python frontend/build_frontend.py
 
 COPY app.py .
 COPY hoffman2_chatbot_web.py .
+COPY templates ./templates
 
 COPY hoffman2_index ./hoffman2_index
 
+RUN chown -R app:app /app
+
+USER app
+
 EXPOSE 5000
 
-CMD ["python", "app.py"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "120", "app:app"]
